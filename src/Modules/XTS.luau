@@ -34,6 +34,8 @@ export type XTSKey = {
 -- Constants
 local BLOCK_SIZE: number = 16
 local SECTOR_SIZE: number = 512
+local MAX_DATA_UNIT_BLOCKS: number = 0x100000 -- 2^20 blocks per NIST SP 800-38E
+local MAX_DATA_UNIT_SIZE: number = MAX_DATA_UNIT_BLOCKS * BLOCK_SIZE -- 16MB
 
 local function get_cipher_module(cipher: CipherType): CipherModule
 	if cipher == "AES" then return AES
@@ -91,8 +93,19 @@ local function sector_to_tweak(sectorNum: number): ByteArray
 	return tweak
 end
 
+-- This is our check for if two keys are identical (XTS requires Key1 != Key2)
+local function keys_equal(key1: ByteArray, key2: ByteArray): boolean
+	if #key1 ~= #key2 then return false end
+	for i = 1, #key1 do
+		if key1[i] ~= key2[i] then return false end
+	end
+	return true
+end
+
 -- Create XTS key from two cipher keys
 local function create_key(cipher: CipherType, key1: ByteArray, key2: ByteArray): XTSKey
+	if keys_equal(key1, key2) then error("XTS requires Key1 != Key2 (identical keys reduce to ECB mode)") end
+
 	local cipherModule = get_cipher_module(cipher)
 	return {
 		cipher = cipher,
@@ -185,6 +198,8 @@ end
 -- Encrypt arbitrary length data (spans over multiple sectors)
 local function encrypt(key: XTSKey, startSector: number, plaintext: ByteArray): ByteArray
 	local dataLen = #plaintext
+	if dataLen > MAX_DATA_UNIT_SIZE then error(`XTS data unit exceeds max size of {MAX_DATA_UNIT_SIZE} bytes (NIST SP 800-38E)`) end
+
 	local numSectors = math.ceil(dataLen / SECTOR_SIZE)
 	local ciphertext = table_create(dataLen) :: ByteArray
 
@@ -211,6 +226,8 @@ end
 -- Decrypt arbitrary length data
 local function decrypt(key: XTSKey, startSector: number, ciphertext: ByteArray): ByteArray
 	local dataLen = #ciphertext
+	if dataLen > MAX_DATA_UNIT_SIZE then error(`XTS data unit exceeds max size of {MAX_DATA_UNIT_SIZE} bytes (NIST SP 800-38E)`) end
+
 	local numSectors = math.ceil(dataLen / SECTOR_SIZE)
 	local plaintext = table_create(dataLen) :: ByteArray
 

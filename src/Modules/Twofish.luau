@@ -137,6 +137,9 @@ local function rs_multiply(k: { number }): number
 end
 
 local function expand_key(key: ByteArray): TwofishKey
+	local keyLen = #key
+	if keyLen < KEY_SIZE then error(`Twofish requires {KEY_SIZE}-byte key, got {keyLen} bytes`) end
+
 	local Me: { number } = table_create(4) :: { number }
 	local Mo: { number } = table_create(4) :: { number }
 
@@ -249,7 +252,7 @@ local function decrypt_block(key: TwofishKey, input: ByteArray, inputOffset: num
 	local x1 = bxor(c3, sk[8])
 	local x2 = bxor(c0, sk[5])
 	local x3 = bxor(c1, sk[6])
-	
+
 	for r = 15, 0, -1 do
 		-- x2 and x3 hold the original x0 and x1 from encrypt round
 		local t0 = g_func(x2, sbox)

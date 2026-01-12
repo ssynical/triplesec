@@ -78,7 +78,7 @@ local DEFAULT_ITERATIONS: { [HashAlgorithm]: number } = {
 	Whirlpool = 500000,
 }
 
-local CRC32_TABLE: { number } = table_create(256) :: number
+local CRC32_TABLE: { number } = table_create(256) :: { number }
 do
 	for i = 0, 255 do
 		local crc = i
@@ -112,7 +112,7 @@ local function generate_master_keys(): (ByteArray, ByteArray)
 end
 
 local function derive_keys(password: string, salt: ByteArray, hash: HashAlgorithm, iterations: number?, keyLength: number?): ByteArray
-	local passwordBytes = table_create(#password)
+	local passwordBytes = table_create(#password) :: ByteArray
 	for i = 1, #password do passwordBytes[i] = string_byte(password, i) end
 
 	local iters = iterations or DEFAULT_ITERATIONS[hash]
@@ -330,7 +330,7 @@ local function create_volume(password: string, config: VolumeConfig): Volume
 
 	local encryptedHeader = encrypt_header(paddedHeader, derivedKey, cipher)
 
-	local volumeKeyMaterial = table_create(128)
+	local volumeKeyMaterial = table_create(128) :: ByteArray
 	for i = 1, 64 do volumeKeyMaterial[i] = masterKey[i] end
 	for i = 1, 64 do volumeKeyMaterial[64 + i] = secondaryKey[i] end
 
@@ -358,7 +358,7 @@ local function open_volume(password: string, volumeHeader: VolumeHeader, cipher:
 	local header = deserialize_header(decryptedHeaderBytes)
 	if not header then return nil end
 
-	local volumeKeyMaterial = table_create(128)
+	local volumeKeyMaterial = table_create(128) :: ByteArray
 	for i = 1, 64 do volumeKeyMaterial[i] = header.masterKey[i] end
 	for i = 1, 64 do volumeKeyMaterial[64 + i] = header.secondaryKey[i] end
 
@@ -492,19 +492,28 @@ local function pkcs7_pad(data: ByteArray, blockSize: number): ByteArray
 	return padded
 end
 
-local function pkcs7_unpad(data: ByteArray): ByteArray
-	local paddingLength = data[#data]
-	local unpadded = table.create(#data - paddingLength) :: ByteArray
-	for i = 1, #data - paddingLength do
-		unpadded[i] = data[i]
+local function pkcs7_unpad(data: ByteArray): ByteArray?
+	local dataLen = #data
+	if dataLen == 0 then return nil end
+
+	local paddingLength = data[dataLen]
+	if paddingLength == 0 or paddingLength > 16 or paddingLength > dataLen then return nil end
+
+	-- Here, we have to verify that all padding bytes match the padding length value
+	for i = dataLen - paddingLength + 1, dataLen do
+		if data[i] ~= paddingLength then return nil end
 	end
+
+	local unpaddedLen = dataLen - paddingLength
+	local unpadded = table_create(unpaddedLen) :: ByteArray
+	for i = 1, unpaddedLen do unpadded[i] = data[i] end
 	return unpadded
 end
 
 local function simple_encrypt(password: string, plaintext: ByteArray, cipher: CascadeType?, hash: HashAlgorithm?, iterations: number?): { salt: ByteArray, ciphertext: ByteArray }
 	local c = cipher or "AES-Twofish-Serpent"
 	local h = hash or "SHA512"
-	local iters = iterations or 10000
+	local iters = iterations or DEFAULT_ITERATIONS[h]
 
 	-- We do this because, i.e., the AES-Twofish-Serpent cascade needs 16 byte aligned blocks
 	local padded = pkcs7_pad(plaintext, 16)
@@ -519,10 +528,10 @@ local function simple_encrypt(password: string, plaintext: ByteArray, cipher: Ca
 	return { salt = salt, ciphertext = ciphertext }
 end
 
-local function simple_decrypt(password: string, salt: ByteArray, ciphertext: ByteArray, cipher: CascadeType?, hash: HashAlgorithm?, iterations: number?): ByteArray
+local function simple_decrypt(password: string, salt: ByteArray, ciphertext: ByteArray, cipher: CascadeType?, hash: HashAlgorithm?, iterations: number?): ByteArray?
 	local c = cipher or "AES-Twofish-Serpent"
 	local h = hash or "SHA512"
-	local iters = iterations or 10000
+	local iters = iterations or DEFAULT_ITERATIONS[h]
 
 	local keyLength = CipherCascade.get_key_length(c)
 	local key = derive_keys(password, salt, h, iters, keyLength)
@@ -530,7 +539,7 @@ local function simple_decrypt(password: string, salt: ByteArray, ciphertext: Byt
 	local cascadeKey = CipherCascade.create_key(c, key)
 	local decrypted = CipherCascade.decrypt(cascadeKey, 0, ciphertext)
 
-	-- Auto-unpad the padded data
+	-- Auto-unpad the padded data (returns nil on invalid padding)
 	return pkcs7_unpad(decrypted)
 end
 

@@ -2,6 +2,8 @@
 --!strict
 --!optimize 2
 
+local Blake3 = require(script.Parent.Blake3) -- Credit to @daily3014 & @Xoifail (both on github) for this implementation
+
 local os_clock = os.clock
 local os_time = os.time
 local math_random = math.random
@@ -178,21 +180,37 @@ local function collect_table_entropy(): { number }
 end
 
 local function mix_into_pool(pool: { number }, entropy: { number }): ()
+	-- Gather all entropy into a byte array for the BLAKE3 extraction
 	local entropyLen = #entropy
-	for i = 1, entropyLen do
-		local idx = ((i - 1) % POOL_WORDS) + 1
-		pool[idx] = bxor(pool[idx], entropy[i])
-		pool[idx] = lrotate(pool[idx], (i * 7) % 32)
+	local poolLen = #pool
+	local totalWords = entropyLen + poolLen
+	local inputBytes = table_create(totalWords * 4) :: ByteArray
+
+	for i = 1, poolLen do
+		local word = pool[i]
+		local offset = (i - 1) * 4
+		inputBytes[offset + 1] = band(word, 0xFF)
+		inputBytes[offset + 2] = band(rshift(word, 8), 0xFF)
+		inputBytes[offset + 3] = band(rshift(word, 16), 0xFF)
+		inputBytes[offset + 4] = band(rshift(word, 24), 0xFF)
 	end
 
-	-- Add chacha mixing to the pool segments
-	for i = 1, POOL_WORDS, 16 do
-		local segment = table_create(16) :: { number }
-		for j = 1, 16 do segment[j] = pool[i + j - 1] or 0 end
-		local mixed = chacha_block(segment)
-		for j = 1, 16 do
-			if i + j - 1 <= POOL_WORDS then pool[i + j - 1] = mixed[j] end
-		end
+	for i = 1, entropyLen do
+		local word = entropy[i]
+		local offset = (poolLen + i - 1) * 4
+		inputBytes[offset + 1] = band(word, 0xFF)
+		inputBytes[offset + 2] = band(rshift(word, 8), 0xFF)
+		inputBytes[offset + 3] = band(rshift(word, 16), 0xFF)
+		inputBytes[offset + 4] = band(rshift(word, 24), 0xFF)
+	end
+
+	-- Use BLAKE3 as our entropy extractor
+	local extracted = Blake3.hash(inputBytes, POOL_SIZE)
+
+	-- Update the pool with said extracted entropy
+	for i = 1, POOL_WORDS do
+		local offset = (i - 1) * 4
+		pool[i] = extracted[offset + 1] + extracted[offset + 2] * 256 + extracted[offset + 3] * 65536 + extracted[offset + 4] * 16777216
 	end
 end
 

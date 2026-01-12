@@ -201,6 +201,7 @@ local function hash_string_hex(str: string): string
 	return hash_hex(bytes)
 end
 
+-- Constants for external use
 local BLOCK_SIZE: number = 64
 local DIGEST_SIZE: number = 32
 

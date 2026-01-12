@@ -15,6 +15,108 @@ local KEY_SIZE: number = 32
 local ROUNDS: number = 32
 local PHI: number = 0x9E3779B9
 
+-- Initial Permutation for NESSIE compliance (https://www.cl.cam.ac.uk/archive/rja14/Papers/serpent.pdf)
+-- This fucntion converts from standard representation to bitslice representation
+local function initial_permutation(x0: number, x1: number, x2: number, x3: number): (number, number, number, number)
+	local y0, y1, y2, y3 = 0, 0, 0, 0
+	for i = 0, 31 do
+		local bit0 = band(rshift(x0, i), 1)
+		local bit1 = band(rshift(x1, i), 1)
+		local bit2 = band(rshift(x2, i), 1)
+		local bit3 = band(rshift(x3, i), 1)
+		y0 = bor(y0, lshift(bit0, i))
+		y1 = bor(y1, lshift(bit1, i))
+		y2 = bor(y2, lshift(bit2, i))
+		y3 = bor(y3, lshift(bit3, i))
+	end
+	-- Interleave bits, bit i*4+j of input word j goes to bit i of output word j
+	local r0, r1, r2, r3 = 0, 0, 0, 0
+	for i = 0, 31 do
+		local srcWord = i % 4
+		local srcBit = (i // 4) + (i % 4) * 8
+		local bit
+		if srcWord == 0 then bit = band(rshift(x0, srcBit % 32), 1)
+		elseif srcWord == 1 then bit = band(rshift(x1, srcBit % 32), 1)
+		elseif srcWord == 2 then bit = band(rshift(x2, srcBit % 32), 1)
+		else bit = band(rshift(x3, srcBit % 32), 1) end
+		r0 = bor(r0, lshift(bit, i))
+	end
+	for i = 0, 31 do
+		local srcWord = (i + 1) % 4
+		local srcBit = (i // 4) + ((i + 1) % 4) * 8
+		local bit
+		if srcWord == 0 then bit = band(rshift(x0, srcBit % 32), 1)
+		elseif srcWord == 1 then bit = band(rshift(x1, srcBit % 32), 1)
+		elseif srcWord == 2 then bit = band(rshift(x2, srcBit % 32), 1)
+		else bit = band(rshift(x3, srcBit % 32), 1) end
+		r1 = bor(r1, lshift(bit, i))
+	end
+	for i = 0, 31 do
+		local srcWord = (i + 2) % 4
+		local srcBit = (i // 4) + ((i + 2) % 4) * 8
+		local bit
+		if srcWord == 0 then bit = band(rshift(x0, srcBit % 32), 1)
+		elseif srcWord == 1 then bit = band(rshift(x1, srcBit % 32), 1)
+		elseif srcWord == 2 then bit = band(rshift(x2, srcBit % 32), 1)
+		else bit = band(rshift(x3, srcBit % 32), 1) end
+		r2 = bor(r2, lshift(bit, i))
+	end
+	for i = 0, 31 do
+		local srcWord = (i + 3) % 4
+		local srcBit = (i // 4) + ((i + 3) % 4) * 8
+		local bit
+		if srcWord == 0 then bit = band(rshift(x0, srcBit % 32), 1)
+		elseif srcWord == 1 then bit = band(rshift(x1, srcBit % 32), 1)
+		elseif srcWord == 2 then bit = band(rshift(x2, srcBit % 32), 1)
+		else bit = band(rshift(x3, srcBit % 32), 1) end
+		r3 = bor(r3, lshift(bit, i))
+	end
+	return r0, r1, r2, r3
+end
+
+-- Final Permutation
+-- This function converts from bitslice representation to standard representation (inverse of prev.)
+local function final_permutation(x0: number, x1: number, x2: number, x3: number): (number, number, number, number)
+	local r0, r1, r2, r3 = 0, 0, 0, 0
+	for i = 0, 31 do
+		local dstBit = (i % 4) * 8 + (i // 4)
+		local bit = band(rshift(x0, i), 1)
+		local dstWord = i % 4
+		if dstWord == 0 then r0 = bor(r0, lshift(bit, dstBit % 32))
+		elseif dstWord == 1 then r1 = bor(r1, lshift(bit, dstBit % 32))
+		elseif dstWord == 2 then r2 = bor(r2, lshift(bit, dstBit % 32))
+		else r3 = bor(r3, lshift(bit, dstBit % 32)) end
+	end
+	for i = 0, 31 do
+		local dstBit = ((i + 3) % 4) * 8 + (i // 4)
+		local bit = band(rshift(x1, i), 1)
+		local dstWord = (i + 3) % 4
+		if dstWord == 0 then r0 = bor(r0, lshift(bit, dstBit % 32))
+		elseif dstWord == 1 then r1 = bor(r1, lshift(bit, dstBit % 32))
+		elseif dstWord == 2 then r2 = bor(r2, lshift(bit, dstBit % 32))
+		else r3 = bor(r3, lshift(bit, dstBit % 32)) end
+	end
+	for i = 0, 31 do
+		local dstBit = ((i + 2) % 4) * 8 + (i // 4)
+		local bit = band(rshift(x2, i), 1)
+		local dstWord = (i + 2) % 4
+		if dstWord == 0 then r0 = bor(r0, lshift(bit, dstBit % 32))
+		elseif dstWord == 1 then r1 = bor(r1, lshift(bit, dstBit % 32))
+		elseif dstWord == 2 then r2 = bor(r2, lshift(bit, dstBit % 32))
+		else r3 = bor(r3, lshift(bit, dstBit % 32)) end
+	end
+	for i = 0, 31 do
+		local dstBit = ((i + 1) % 4) * 8 + (i // 4)
+		local bit = band(rshift(x3, i), 1)
+		local dstWord = (i + 1) % 4
+		if dstWord == 0 then r0 = bor(r0, lshift(bit, dstBit % 32))
+		elseif dstWord == 1 then r1 = bor(r1, lshift(bit, dstBit % 32))
+		elseif dstWord == 2 then r2 = bor(r2, lshift(bit, dstBit % 32))
+		else r3 = bor(r3, lshift(bit, dstBit % 32)) end
+	end
+	return r0, r1, r2, r3
+end
+
 local function SBOX0(a: number, b: number, c: number, d: number): (number, number, number, number)
 	local t01 = bxor(b, c)
 	local t02 = bor(a, d)
@@ -385,6 +487,9 @@ local function ILT(x0: number, x1: number, x2: number, x3: number): (number, num
 end
 
 local function expand_key(key: ByteArray): SerpentKey
+	local keyLen = #key
+	if keyLen < KEY_SIZE then error(`Serpent requires {KEY_SIZE}-byte key, got {keyLen} bytes`) end
+
 	local w: { number } = table_create(140) :: { number }
 
 	for i = 1, 8 do
@@ -433,7 +538,7 @@ local function encrypt_block(key: SerpentKey, input: ByteArray, inputOffset: num
 	for r = 1, 32 do
 		local k = sk[r]
 		x0, x1, x2, x3 = bxor(x0, k[1]), bxor(x1, k[2]), bxor(x2, k[3]), bxor(x3, k[4])
-
+		assert(x3 ~= nil, "x3 cannot be nil")
 		local sbox = (r - 1) % 8
 		if sbox == 0 then x0, x1, x2, x3 = SBOX0(x0, x1, x2, x3)
 		elseif sbox == 1 then x0, x1, x2, x3 = SBOX1(x0, x1, x2, x3)
@@ -471,11 +576,13 @@ local function decrypt_block(key: SerpentKey, input: ByteArray, inputOffset: num
 
 	local k = sk[33]
 	x0, x1, x2, x3 = bxor(x0, k[1]), bxor(x1, k[2]), bxor(x2, k[3]), bxor(x3, k[4])
+	assert(x3 ~= nil, "x3 cannot be nil")
 	x0, x1, x2, x3 = SBOX7_INVERSE(x0, x1, x2, x3)
 	k = sk[32]
 	x0, x1, x2, x3 = bxor(x0, k[1]), bxor(x1, k[2]), bxor(x2, k[3]), bxor(x3, k[4])
 
 	for r = 31, 1, -1 do
+		assert(x3 ~= nil, "x3 cannot be nil")
 		x0, x1, x2, x3 = ILT(x0, x1, x2, x3)
 
 		local sbox = (r - 1) % 8

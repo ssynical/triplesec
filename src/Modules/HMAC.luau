@@ -163,7 +163,8 @@ end
 
 local function get_block_size(algorithm: HashAlgorithm): number
 	if algorithm == "SHA256" then return 64
-	else return 128 end
+	elseif algorithm == "SHA512" then return 128
+	else return 64 end -- :)
 end
 
 return {
